@@ -1,15 +1,16 @@
 # POSTGRES-KAFKA-ICEBERG-PIPELINE
 
-Example pipeline to stream the data changes from RDBMS to Apache Iceberg tables under two approaches.
+Example pipeline to stream the data changes from RDBMS to Apache Iceberg tables stored on an S3 compatible object store (MinIO) and tracked in a Hive metastore under two approaches.
 
 1. Manually processing the Kafka messages via Spark
-2. Using Kafka Sink Connector for Iceberg from [iceberg-kafka-connect](https://github.com/tabular-io/iceberg-kafka-connect/) repo
+2. Using the Apache Iceberg Kafka Connect sink connector
 
 https://github.com/waiyan1612/postgres-kafka-iceberg-pipeline/assets/8967715/91d59de8-60e2-4e4c-b54a-47c1d36039a3
 
 ## Contents
 ```sh
-├── docker-compose.yaml                        -> Compose file to launch postgres, kafka and spark containers
+├── docker-compose.yaml                        -> Compose file to launch postgres, kafka, minio, hive metastore and spark containers
+├── pom.xml                                    -> Maven descriptor listing the required libraries
 ├── kafka
 │   ├── config
 │   │   ├── connect-file-sink.properties       -> File sink connector
@@ -17,8 +18,8 @@ https://github.com/waiyan1612/postgres-kafka-iceberg-pipeline/assets/8967715/91d
 │   │   ├── connect-postgres-source.json       -> Postgres source connector
 │   │   └── connect-standalone.properties      -> Standalone kafka conenct config
 │   └── plugins
-│       └── debezium-connector-postgres        -> Debezium connector jars should be downloaded to this folder
-│       └── iceberg-kafka-connect              -> Iceberg kafka connect jars should be downloaded to this folder
+│       └── debezium-connector-postgres        -> Populated by Maven with Debezium connector jars
+│       └── iceberg-kafka-connect              -> Populated by Maven with Apache Iceberg Kafka Connect jars
 ├── postgres
 │   ├── postgresql.conf                        -> Config with logical replication enabled
 │   └── scripts
@@ -31,49 +32,23 @@ https://github.com/waiyan1612/postgres-kafka-iceberg-pipeline/assets/8967715/91d
         └── print_iceberg_tables.py            -> Pyspark script to query the tables created by Spark/Iceberg Sink Kafka connector
 
 ```
-Moreover, these folders will be created and mounted so that docker containers can write back to the host file system.
+The Kafka file sink writes to the host path below while all Iceberg table data is stored in MinIO.
 ```sh
-├── data                                       -> Data from containers will be mounted to this path Configured in docker-compose file.
-│   ├── kafka
-│   │   └── out
-│   │      ├── cdc.commerce.sink.txt           -> Output of Kafka File sink connector
-│   │      └── iceberg/warehouse               -> Storage location used by Kafka Iceberg sink for each table data + metadata
-│   └── spark
+├── data
+│   └── kafka
 │       └── out
-│          ├── iceberg/warehouse               -> Storage location used by Spark Iceberg sink for each table data + metadata
-│          └── spark/checkpoint                -> Checkpoint location used by Spark structured streaming
+│          └── cdc.commerce.sink.txt           -> Output of Kafka File sink connector
 ```
 
 ## Setup Guide
 
-1. Download the connectors and copy them to `kafka/plugins` folder that will be mounted to the docker container.
-    
-    ```sh
-    TMP_FOLDER=/tmp/dbz-pg-connector
-    mkdir -p $TMP_FOLDER
-    # See https://debezium.io/documentation/reference/stable/install.html to get the download link.
-    wget -qO- https://repo1.maven.org/maven2/io/debezium/debezium-connector-postgres/2.6.0.Final/debezium-connector-postgres-2.6.0.Final-plugin.tar.gz | tar -xvz -C $TMP_FOLDER
-    cp $TMP_FOLDER/debezium-connector-postgres/*.jar $PWD/kafka/plugins/debezium-connector-postgres && rm -rf $TMP_FOLDER
+1. Run the setup script. It uses Maven (via `pom.xml`) to download the Kafka Connect plugins, starts all services, creates the MinIO warehouse bucket, and launches the Kafka connectors.
 
-    TMP_FOLDER=/tmp/iceberg-kafka-connect
-    mkdir -p $TMP_FOLDER
-    # See https://github.com/tabular-io/iceberg-kafka-connect/releases to get the download link.
-    wget -qO- https://github.com/tabular-io/iceberg-kafka-connect/releases/download/v0.6.15/iceberg-kafka-connect-runtime-0.6.15.zip | tar -xvz -C $TMP_FOLDER
-    cp $TMP_FOLDER/iceberg-kafka-connect-runtime-0.6.15/lib/*.jar $PWD/kafka/plugins/iceberg-kafka-connect && rm -rf $TMP_FOLDER
-    # Download hadoop dependencies that are not included
-    wget -P $PWD/kafka/plugins/iceberg-kafka-connect https://repo1.maven.org/maven2/org/apache/commons/commons-configuration2/2.0/commons-configuration2-2.0.jar
-    wget -P $PWD/kafka/plugins/iceberg-kafka-connect https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-auth/3.3.6/hadoop-auth-3.3.6.jar
+    ```sh
+    ./setup.sh
     ```
 
-2. Run Docker compose. This will 
-    1. Start the Postgres database and also run the scripts under `postgres/scripts/seed`.
-    2. Start the Kafka in KRaft mode. The plugins from the previosuly step will be loaded.
-    3. Start a spark container that will run the pyspark script from `spark/scripts/consumer.py`. This container will also be used to visualize the created iceberg tables.
-    ```sh
-    docker compose up
-    ```
-
-3. If we are running for the first time, spark container will need to download the required dependencies. We need to wait for the downloads to complete before we can proceed. We can monitor the stdout to see if the downloads are completed. Alternatively, we can also query to see the spark streaming app is already running.
+2. If we are running for the first time, the spark container will need to download the required dependencies. We need to wait for the downloads to complete before we can proceed. We can monitor the stdout to see if the downloads are completed. Alternatively, we can also query to see the spark streaming app is already running.
     ```sh
     docker container exec kafka-spark curl -s http://localhost:4040/api/v1/applications | jq
     ```
@@ -101,70 +76,12 @@ Moreover, these folders will be created and mounted so that docker containers ca
     ]
     ```
 
-4. Create and start the kafka connectors for postgres source and iceberg sink in detached mode.
-    ```sh
-    docker container exec -d kafka-standalone \
-      /opt/kafka/bin/connect-standalone.sh \
-      /opt/kafka/config-cdc/connect-standalone.properties \
-      /opt/kafka/config-cdc/connect-postgres-source.json \
-      /opt/kafka/config-cdc/connect-iceberg-sink.json
-    ```
-    Note: If we are facing issues with the iceberg sink connector, we can use the file sink connector to debug.
-    ```sh
-    docker container exec -d kafka-standalone \
-      /opt/kafka/bin/connect-standalone.sh \
-      /opt/kafka/config-cdc/connect-standalone.properties \
-      /opt/kafka/config-cdc/connect-postgres-source.json \
-      /opt/kafka/config-cdc/connect-file-sink.properties
-    ```
-
-5. We can monitor the console to see if the connectors are ready. Alternatively, we can also query to see the status of the connectors.
-    ```sh
-    curl -s localhost:8083/connectors/dbz-pg-source/status | jq
-    curl -s localhost:8083/connectors/iceberg-sink/status | jq
-    ```
-    **Responses**
-    ```json
-    {
-      "name": "dbz-pg-source",
-      "connector": {
-        "state": "RUNNING",
-        "worker_id": "172.21.0.2:8083"
-      },
-      "tasks": [
-        {
-          "id": 0,
-          "state": "RUNNING",
-          "worker_id": "172.21.0.2:8083"
-        }
-      ],
-      "type": "source"
-    }
-    ```
-    ```json
-    {
-      "name": "iceberg-sink",
-      "connector": {
-        "state": "RUNNING",
-        "worker_id": "172.21.0.2:8083"
-      },
-      "tasks": [
-        {
-          "id": 0,
-          "state": "RUNNING",
-          "worker_id": "172.21.0.2:8083"
-        }
-      ],
-      "type": "sink"
-    }
-    ```
-
-5. Check the Iceberg tables from the sinks.
-    1. Check the iceberg tables created by Spark. 
+3. Check the Iceberg tables from the sinks.
+    1. Check the iceberg tables created by Spark.
         ```sh
         docker container exec kafka-spark \
           /opt/spark/bin/spark-submit \
-          --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.5.0 \
+          --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.6.1,org.apache.iceberg:iceberg-aws:1.6.1,org.apache.iceberg:iceberg-hive-metastore:1.6.1 \
           --conf spark.driver.extraJavaOptions="-Divy.cache.dir=/.ivy -Divy.home=/.ivy" \
           /scripts/print_iceberg_tables.py spark
         ```
@@ -185,11 +102,11 @@ Moreover, these folders will be created and mounted so that docker containers ca
         |NULL  |{"product_id":2,"product_name":"Simple Teak Dining Chair","created_at":1713192083641523}|r  |
         +------+----------------------------------------------------------------------------------------+---+
         ```
-    2. Check the iceberg tables created by Iceberg sink kafka connector. 
+    2. Check the iceberg tables created by Iceberg sink kafka connector.
         ```sh
         docker container exec kafka-spark \
         /opt/spark/bin/spark-submit \
-          --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.5.0 \
+          --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.6.1,org.apache.iceberg:iceberg-aws:1.6.1,org.apache.iceberg:iceberg-hive-metastore:1.6.1 \
           --conf spark.driver.extraJavaOptions="-Divy.cache.dir=/.ivy -Divy.home=/.ivy" \
           /scripts/print_iceberg_tables.py kafka
         ```
@@ -213,10 +130,10 @@ Moreover, these folders will be created and mounted so that docker containers ca
     3. We can also run the pyspark shell to debug or run further analysis.
         ```sh
         docker container exec -it kafka-spark /opt/spark/bin/pyspark \
-        --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.5.0 \
+        --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.6.1,org.apache.iceberg:iceberg-aws:1.6.1,org.apache.iceberg:iceberg-hive-metastore:1.6.1 \
         --conf spark.driver.extraJavaOptions="-Divy.cache.dir=/.ivy -Divy.home=/.ivy"
         ```
-6. Run the CUD operations on postgres. Repeat step 5-6.
+4. Run the CUD operations on postgres. Repeat step 3-4.
 
 ## Helpful Commands for Debugging
 

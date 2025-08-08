@@ -48,14 +48,38 @@ services:
     deploy:
       replicas: 1
 
+  minio:
+    image: 'minio/minio:latest'
+    container_name: minio
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - "$PWD/data/minio:/data"
+
+  hive-metastore:
+    image: 'apache/hive:3.1.3'
+    container_name: hive-metastore
+    ports:
+      - '9083:9083'
+    command: >
+      bash -c "schematool -dbType derby -initSchema && hive --service metastore"
+    volumes:
+      - "$PWD/data/hive:/var/lib/hive"
+
   kafka-spark:
     image: 'apache/spark:3.5.1-java17-python3'
     container_name: kafka-spark
     # This will take time because it will download all the kafka dependencies for spark
-    command: /opt/spark/bin/spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.5.0 --conf spark.driver.extraJavaOptions="-Divy.cache.dir=/.ivy -Divy.home=/.ivy" /scripts/consumer.py
+    command: /opt/spark/bin/spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.6.1,org.apache.iceberg:iceberg-aws:1.6.1,org.apache.iceberg:iceberg-hive-metastore:1.6.1 --conf spark.driver.extraJavaOptions="-Divy.cache.dir=/.ivy -Divy.home=/.ivy" /scripts/consumer.py
     user: root # Required to write back to host volume
     volumes:
       - "$PWD/spark/scripts/:/scripts"
       - "$PWD/spark/.ivy/:/.ivy"
-      - "$PWD/data/spark/out/:/out-spark"
       - "$PWD/data/kafka/out/:/out-kafka"
+    depends_on:
+      - hive-metastore

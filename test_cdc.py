@@ -126,7 +126,7 @@ print("Querying Iceberg tables via print_iceberg_tables.py 'spark'...")
 iceberg_cmd = (
     "docker container exec kafka-spark "
     "/opt/spark/bin/spark-submit "
-    "--packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.5.0 "
+    "--packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.6.1,org.apache.iceberg:iceberg-aws:1.6.1,org.apache.iceberg:iceberg-hive-metastore:1.6.1 "
     "--conf spark.driver.extraJavaOptions=\"-Divy.cache.dir=/.ivy -Divy.home=/.ivy\" "
     "/scripts/print_iceberg_tables.py spark"
 )
