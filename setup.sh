@@ -1,6 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Download Kafka Connect plugins via Maven
+mkdir -p kafka/plugins/debezium-connector-postgres kafka/plugins/iceberg-kafka-connect
+mvn -q org.apache.maven.plugins:maven-dependency-plugin:3.6.1:copy-dependencies \
+  -Dmdep.useRepoLayout=false \
+  -Dmdep.outputDirectory=kafka/plugins/debezium-connector-postgres \
+  -Dmdep.includeGroupIds=io.debezium \
+  -Dmdep.includeArtifactIds=debezium-connector-postgres >/dev/null
+mvn -q org.apache.maven.plugins:maven-dependency-plugin:3.6.1:copy-dependencies \
+  -Dmdep.useRepoLayout=false \
+  -Dmdep.outputDirectory=kafka/plugins/iceberg-kafka-connect \
+  -Dmdep.includeGroupIds=org.apache.iceberg \
+  -Dmdep.includeArtifactIds=iceberg-kafka-connect,iceberg-kafka-connect-events >/dev/null
+
 # Start services in detached mode
 if ! docker compose up -d; then
   echo "docker compose up failed" >&2

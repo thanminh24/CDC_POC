@@ -27,11 +27,6 @@
     </dependency>
     <dependency>
       <groupId>org.apache.iceberg</groupId>
-      <artifactId>iceberg-kafka-connect-transforms</artifactId>
-      <version>1.6.1</version>
-    </dependency>
-    <dependency>
-      <groupId>org.apache.iceberg</groupId>
       <artifactId>iceberg-kafka-connect-events</artifactId>
       <version>1.6.1</version>
     </dependency>
