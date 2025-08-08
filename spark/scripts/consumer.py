@@ -3,23 +3,34 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, get_json_object
 from pyspark.sql.types import StringType
 
+MINIO_ENDPOINT = 'http://minio:9000'
+MINIO_ACCESS_KEY = 'minioadmin'
+MINIO_SECRET_KEY = 'minioadmin'
+HIVE_METASTORE_URI = 'thrift://hive-metastore:9083'
+
 # This is the same KAFKA_ADVERTISED_LISTENERS defined in docker-compose.yaml
 KAFKA_BOOTSTRAP_SERVER = 'kafka-standalone:19092'
 KAFKA_TOPICS = 'cdc.commerce.*'
 
-SPARK_ICEBERG_WAREHOUSE_PATH = '/out-spark/iceberg/warehouse' 
-ICEBERG_CHECKPOINT_PATH = '/out/spark/checkpoint/iceberg'
+SPARK_ICEBERG_WAREHOUSE_PATH = 's3://warehouse/spark/iceberg/warehouse'
+ICEBERG_CHECKPOINT_PATH = '/tmp/spark/checkpoint/iceberg'
 CATALOG_NAME = 'iceberg'
 
-# Configure spark catalogs. Note: Iceberg does not work with Spark's default hive metastore - https://github.com/apache/iceberg/issues/7847
+# Configure Spark catalogs backed by the Hive metastore
 conf = (pyspark.SparkConf()
     .set('spark.sql.shuffle.partitions', '2')
     .set('spark.sql.extensions', 'org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions')
     .set('spark.sql.catalog.spark_catalog', 'org.apache.iceberg.spark.SparkSessionCatalog')
     .set('spark.sql.catalog.spark_catalog.type', 'hive')
     .set(f'spark.sql.catalog.{CATALOG_NAME}', 'org.apache.iceberg.spark.SparkCatalog')
-    .set(f'spark.sql.catalog.{CATALOG_NAME}.type', 'hadoop')
+    .set(f'spark.sql.catalog.{CATALOG_NAME}.type', 'hive')
+    .set(f'spark.sql.catalog.{CATALOG_NAME}.uri', HIVE_METASTORE_URI)
     .set(f'spark.sql.catalog.{CATALOG_NAME}.warehouse', SPARK_ICEBERG_WAREHOUSE_PATH)
+    .set(f'spark.sql.catalog.{CATALOG_NAME}.io-impl', 'org.apache.iceberg.aws.s3.S3FileIO')
+    .set(f'spark.sql.catalog.{CATALOG_NAME}.s3.endpoint', MINIO_ENDPOINT)
+    .set(f'spark.sql.catalog.{CATALOG_NAME}.s3.access-key-id', MINIO_ACCESS_KEY)
+    .set(f'spark.sql.catalog.{CATALOG_NAME}.s3.secret-access-key', MINIO_SECRET_KEY)
+    .set(f'spark.sql.catalog.{CATALOG_NAME}.s3.path-style-access', 'true')
 )
 
 spark = (SparkSession.builder
